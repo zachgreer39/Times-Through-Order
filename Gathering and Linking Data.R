@@ -406,4 +406,4 @@ rm(at_bats);
 ##dbCreateTable(con, "pitch_df", pitch_df, row.names=NULL);
 ##dbWriteTable(con, "pitch_df", pitch_df, row.names=FALSE, append=TRUE);
 dbDisconnect(con);
-rm(con);
+

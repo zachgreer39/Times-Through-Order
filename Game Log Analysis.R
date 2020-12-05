@@ -11,7 +11,7 @@ library(purrr);
 ##install.packages("cluster");
 library(cluster);
 
-setwd("Github/Times-Through-Order/Times-Through_Order");
+setwd("~/Github/Times-Through-Order");
 
 ##Connection to AWS Database
 con=dbConnect(RMySQL::MySQL(), dbname="zgreer_baseball",
@@ -166,12 +166,12 @@ cluster_summary=gamelog_df %>% group_by(cluster) %>%
   summarise(Count=n(), Win_Rate=sum(W)/(sum(W)+sum(L)), ERA=mean(ERA), 
         TBF=mean(TBF), Innings=mean(Innings), Balls=mean(balls), 
         Strikes=mean(strikes), Hper9=mean(Hper9), HRper9=mean(HRper9), 
-        Kper9=mean(Kper9),BBper9=mean(BBper9),BABIP=mean(BABIP),FIP=mean(FIP)); 
+        Kper9=mean(Kper9),BBper9=mean(BBper9),BABIP=mean(BABIP),FIP=mean(FIP));
 ##write.csv(gamelog_df, "gamelog_df.csv", col.names=TRUE, row.names=FALSE);
 
+##dbCreateTable(con, "clustered_gamelogs", gamelog_df, row.names=NULL);
+##dbWriteTable(con, "clustered_gamelogs", gamelog_df, row.names=FALSE, append=TRUE);
 
-
-
-
+dbDisconnect(con);
 
 
