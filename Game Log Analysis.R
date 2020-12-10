@@ -82,57 +82,39 @@ rm(daily_game_cnt, weekly_game_cnt, x_label);
 
 
 ##Calculating Rate Metrics
-gamelog_df=gamelog_df %>% mutate(
-  Hper9=round(ifelse(is.na(as.numeric(substr(IP,3,3))),
-                     9*H/(as.numeric(substr(IP,1,1))),
-                     9*H/((as.numeric(substr(IP,1,1))) + 
-                            (as.numeric(substr(IP,3,3))/3))),2),
-  HRper9=round(ifelse(is.na(as.numeric(substr(IP,3,3))),
-                      9*HR/(as.numeric(substr(IP,1,1))),
-                      9*HR/((as.numeric(substr(IP,1,1))) + 
-                              (as.numeric(substr(IP,3,3))/3))),2),
-  Kper9=round(ifelse(is.na(as.numeric(substr(IP,3,3))),
-                     9*SO/(as.numeric(substr(IP,1,1))),
-                     9*SO/((as.numeric(substr(IP,1,1))) + 
-                             (as.numeric(substr(IP,3,3))/3))),2),
-  BBper9=round(ifelse(is.na(as.numeric(substr(IP,3,3))),
-                      9*BB/(as.numeric(substr(IP,1,1))),
-                      9*BB/((as.numeric(substr(IP,1,1))) + 
-                              (as.numeric(substr(IP,3,3))/3))),2),
-  Innings=round(ifelse(is.na(as.numeric(substr(IP,3,3))),
-                       (as.numeric(substr(IP,1,1))),
-                       ((as.numeric(substr(IP,1,1))) + 
-                               (as.numeric(substr(IP,3,3))/3))),2), 
-  Year=year(Date));
+gamelog_df=gamelog_df %>% 
+  mutate(WHIP=round((BB+H)/Innings,2), HRper9=round(9*HR/Innings,2), 
+         Kper9=round(9*K/Innings,2), BBper9=round(9*BB/Innings, 2), 
+         Year=year(Date));
 
-
-##Collecting # of balls and strikes
-temp=gamelog_df %>% transmute(game_pk, pitcher=mlbID_pitcher) %>% distinct();
-##dbCreateTable(con, "pitch_cnt_tbl", temp, row.names=NULL);
-##dbWriteTable(con, "pitch_cnt_tbl", temp, row.names=FALSE, append=TRUE);
-##Reading in pitching game log table
-pitch_cnt_tbl=tbl(con, "pitch_cnt_tbl");
+##Reading in statcast pitches table
 pitch_df_tbl=tbl(con, "pitch_df");
-pitch_descs=collect(pitch_cnt_tbl %>% 
-                      left_join(pitch_df_tbl %>% 
-                                  group_by(game_pk, pitcher, description) %>% 
-                                  count(description))) %>% readr::type_convert();
-rm(pitch_cnt_tbl,pitch_df_tbl,temp);
-##unique(pitch_descs$description);
-##Adding count of balls and strikes to gamelog_df
-gamelog_df=gamelog_df %>% left_join(pitch_descs %>% filter(description %in% 
-                         c("ball","pitchout","hit_by_pitch","blocked_ball")) %>% 
-  group_by(game_pk, pitcher) %>% summarise(balls=sum(n)) %>% 
-  left_join(pitch_descs %>% 
-              filter(!description %in% 
-                       c("ball","pitchout","hit_by_pitch","blocked_ball")) %>% 
-  group_by(game_pk, pitcher) %>% summarise(strikes=sum(n))), 
-  by=c("game_pk", "mlbID_pitcher"="pitcher"));
+pitch_df=collect(pitch_df_tbl) %>% readr::type_convert();
+rm(pitch_df_tbl);
+
+
+##Calculating Pitch Count and Strike % and Joining to 
+balls=c("ball", "blocked_ball", "hit_by_pitch", "pitchout");
+not_swings=c(balls, "called_strike");
+swings=setdiff(unique(pitch_df$description), not_swings);
+pitch_df=pitch_df %>%
+  mutate(Ball=ifelse(description %in% balls, 1, 0),
+         Strikes=ifelse(!(description %in% balls), 1, 0),
+         Swings=ifelse(description %in% swings, 1, 0), 
+         Whiff=ifelse(description %in% c("swinging_strike", 
+                        "swinging_strike_blocked", "missed_bunt"), 1, 0));
+rm(balls, not_swings, swings); 
+Strike_Details=pitch_df %>% group_by(game_pk, pitcher) %>% 
+  summarise(PitchCnt=n(), StrikePercent=sum(Strikes)/PitchCnt, 
+            Swings=sum(Swings), WhiffsperSwing=sum(Whiff)/sum(Swings));
+gamelog_df=gamelog_df %>% left_join(Strike_Details);
+
+
 ##Reducing dataframe to variables I want to include for analysis
 reduced_df=as.data.frame(gamelog_df %>% 
-                mutate(row_name=paste(Date, pitcher_name, mlbTeam_pitcher)) %>% 
-  select(row_name, ERA, TBF, Innings, balls, strikes, 
-         Hper9, HRper9, Kper9, BBper9, BABIP));
+                mutate(row_name=paste(game_pk, pitcher, pitcher_team)) %>% 
+  select(row_name, ERA, TBF, Innings, PitchCnt, StrikePercent, WhiffsperSwing, 
+         HRper9, Kper9, BBper9, WHIP, BABIP, wOBAg));
 row.names(reduced_df)=reduced_df$row_name;
 reduced_df=reduced_df %>% select(-row_name);
 
@@ -147,7 +129,7 @@ tot_withinss=map_dbl(1:10, function(k) {
 elbow_df=data.frame(k=1:10, tot_withinss=tot_withinss);
 ggplot(elbow_df, aes(x=k, y=tot_withinss)) + geom_line() + 
   scale_x_continuous(breaks=1:10);
-##Elbows at 2 & 6
+##Elbow at 2
 sil_width=map_dbl(2:10, function(k){
   model=pam(x=reduced_df, k=k)
   model$silinfo$avg.width});
@@ -158,17 +140,21 @@ ggplot(sil_df, aes(x=k, y=sil_width)) + geom_line() +
 ##cluster starts into 2 groups
 model=kmeans(reduced_df, centers=2);
 gamelog_df=cbind(gamelog_df, model$cluster) %>% 
-  rename("cluster"="model$cluster") %>% 
-  mutate(classified=ifelse(cluster==1, "Good Start", "Bad Start"));
-rm(elbow_df, model, pitch_descs, sil_df, sil_width, tot_withinss, reduced_df);
+  rename("cluster"="model$cluster", "mlbTeam_pitcher"="pitcher_team") %>% 
+  mutate(classified=ifelse(cluster==1, "Good Start", "Bad Start"), GS=1);
+rm(elbow_df, model, sil_df, sil_width, tot_withinss, reduced_df);
 ##Summarizing the clusters
-cluster_summary=gamelog_df %>% group_by(cluster) %>% 
+cluster_summary=gamelog_df %>% group_by(classified) %>% 
   summarise(Count=n(), Win_Rate=sum(W)/(sum(W)+sum(L)), ERA=mean(ERA), 
-        TBF=mean(TBF), Innings=mean(Innings), Balls=mean(balls), 
-        Strikes=mean(strikes), Hper9=mean(Hper9), HRper9=mean(HRper9), 
-        Kper9=mean(Kper9),BBper9=mean(BBper9),BABIP=mean(BABIP),FIP=mean(FIP));
+        TBF=mean(TBF), Innings=mean(Innings), Pitches=mean(PitchCnt), 
+        StrikePercent=weighted.mean(StrikePercent, PitchCnt), 
+        WhiffsperSwing=weighted.mean(WhiffsperSwing, Swings), WHIP=mean(WHIP), 
+        HRper9=mean(HRper9), Kper9=mean(Kper9), BBper9=mean(BBper9), 
+        BABIP=mean(BABIP),FIP=mean(FIP));
+
 ##write.csv(gamelog_df, "gamelog_df.csv", col.names=TRUE, row.names=FALSE);
 
+##dbRemoveTable(con, "clustered_gamelogs");
 ##dbCreateTable(con, "clustered_gamelogs", gamelog_df, row.names=NULL);
 ##dbWriteTable(con, "clustered_gamelogs", gamelog_df, row.names=FALSE, append=TRUE);
 
