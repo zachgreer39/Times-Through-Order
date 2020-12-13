@@ -409,7 +409,7 @@ wOBA_group("g") %>% transmute(game_pk, pitcher, wOBAg=wOBA)) %>% left_join(
 ##Selecting Variables needed from pitch_df
 pitch_df=pitch_df %>% 
   transmute(game_pk, game_date, pitcher_team, pitcher, batter_team, batter, 
-            inning, at_bat_number, pitch_name, description, 
+            inning, at_bat_number, pitch_name, description, pitch_number, 
             hit_rating=launch_speed_angle, velocity=release_speed, 
             x_movement=pfx_x, y_movement=pfx_z, spinrate=release_spin_rate);
 
